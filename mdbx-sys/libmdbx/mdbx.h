@@ -830,8 +830,14 @@ enum MDBX_constants {
 #if !(defined(_WIN32) || defined(_WIN64))
 #define MDBX_LOCKNAME "/mdbx.lck"
 #else
-#define MDBX_LOCKNAME L"\\mdbx.lck"
-#endif
+#define MDBX_LOCKNAME_W L"\\mdbx.lck"
+#define MDBX_LOCKNAME_A "\\mdbx.lck"
+#ifdef UNICODE
+#define MDBX_LOCKNAME MDBX_LOCKNAME_W
+#else
+#define MDBX_LOCKNAME MDBX_LOCKNAME_A
+#endif /* UNICODE */
+#endif /* Windows */
 #endif /* MDBX_LOCKNAME */
 #ifndef MDBX_DATANAME
 /** \brief The name of the data file in the environment
@@ -839,8 +845,14 @@ enum MDBX_constants {
 #if !(defined(_WIN32) || defined(_WIN64))
 #define MDBX_DATANAME "/mdbx.dat"
 #else
-#define MDBX_DATANAME L"\\mdbx.dat"
-#endif
+#define MDBX_DATANAME_W L"\\mdbx.dat"
+#define MDBX_DATANAME_A "\\mdbx.dat"
+#ifdef UNICODE
+#define MDBX_DATANAME MDBX_DATANAME_W
+#else
+#define MDBX_DATANAME MDBX_DATANAME_A
+#endif /* UNICODE */
+#endif /* Windows */
 #endif /* MDBX_DATANAME */
 
 #ifndef MDBX_LOCK_SUFFIX
@@ -848,8 +860,14 @@ enum MDBX_constants {
 #if !(defined(_WIN32) || defined(_WIN64))
 #define MDBX_LOCK_SUFFIX "-lck"
 #else
-#define MDBX_LOCK_SUFFIX L"-lck"
-#endif
+#define MDBX_LOCK_SUFFIX_W L"-lck"
+#define MDBX_LOCK_SUFFIX_A "-lck"
+#ifdef UNICODE
+#define MDBX_LOCK_SUFFIX MDBX_LOCK_SUFFIX_W
+#else
+#define MDBX_LOCK_SUFFIX MDBX_LOCK_SUFFIX_A
+#endif /* UNICODE */
+#endif /* Windows */
 #endif /* MDBX_LOCK_SUFFIX */
 
 /* DEBUG & LOGGING ************************************************************/
@@ -1020,12 +1038,15 @@ LIBMDBX_API const char *mdbx_dump_val(const MDBX_val *key, char *const buf,
                                       const size_t bufsize);
 
 /** \brief Panics with message and causes abnormal process termination. */
-LIBMDBX_API void mdbx_panic(const char *fmt, ...) MDBX_PRINTF_ARGS(1, 2);
+MDBX_NORETURN LIBMDBX_API void mdbx_panic(const char *fmt, ...)
+    MDBX_PRINTF_ARGS(1, 2);
 
 /** \brief Panics with asserton failed message and causes abnormal process
  * termination. */
-LIBMDBX_API void mdbx_assert_fail(const MDBX_env *env, const char *msg,
-                                  const char *func, unsigned line);
+MDBX_NORETURN LIBMDBX_API void mdbx_assert_fail(const MDBX_env *env,
+                                                const char *msg,
+                                                const char *func,
+                                                unsigned line);
 /** end of c_debug @} */
 
 /** \brief Environment flags
@@ -1593,8 +1614,7 @@ enum MDBX_put_flags_t {
   MDBX_NOOVERWRITE = UINT32_C(0x10),
 
   /** Has effect only for \ref MDBX_DUPSORT databases.
-   * For upsertion: don't write if the key-value pair already exist.
-   * For deletion: remove all values for key. */
+   * For upsertion: don't write if the key-value pair already exist. */
   MDBX_NODUPDATA = UINT32_C(0x20),
 
   /** For upsertion: overwrite the current key/data pair.
@@ -2495,7 +2515,9 @@ struct MDBX_envinfo {
   uint64_t mi_unsync_volume;
   /** Current auto-sync threshold, see \ref mdbx_env_set_syncbytes(). */
   uint64_t mi_autosync_threshold;
-  /** Time since the last steady sync in 1/65536 of second */
+  /** Time since entering to a "dirty" out-of-sync state in units of 1/65536 of
+   * second. In other words, this is the time since the last non-steady commit
+   * or zero if it was steady. */
   uint32_t mi_since_sync_seconds16dot16;
   /** Current auto-sync period in 1/65536 of second,
    * see \ref mdbx_env_set_syncperiod(). */
@@ -2524,8 +2546,12 @@ struct MDBX_envinfo {
     uint64_t wops;    /**< Number of explicit write operations (not a pages)
                            to a disk */
     uint64_t
+        msync; /**< Number of explicit msync-to-disk operations (not a pages) */
+    uint64_t
+        fsync; /**< Number of explicit fsync-to-disk operations (not a pages) */
+    uint64_t
         gcrtime_seconds16dot16; /**< Time spent loading and searching inside
-                                     GC (aka FreeDB) in 1/65536 of second. */
+                                     GC (aka FreeDB) in 1/65536 of second */
   } mi_pgop_stat;
 };
 #ifndef __cplusplus
@@ -3113,6 +3139,21 @@ mdbx_limits_keysize_max(intptr_t pagesize, MDBX_db_flags_t flags);
 MDBX_NOTHROW_CONST_FUNCTION LIBMDBX_API intptr_t
 mdbx_limits_valsize_max(intptr_t pagesize, MDBX_db_flags_t flags);
 
+/** \brief Returns maximal size of key-value pair to fit in a single page with
+ * the given size and database flags, or -1 if pagesize is invalid.
+ * \ingroup c_statinfo
+ * \see db_flags */
+MDBX_NOTHROW_CONST_FUNCTION LIBMDBX_API intptr_t
+mdbx_limits_pairsize4page_max(intptr_t pagesize, MDBX_db_flags_t flags);
+
+/** \brief Returns maximal data size in bytes to fit in a leaf-page or
+ * single overflow/large-page with the given page size and database flags,
+ * or -1 if pagesize is invalid.
+ * \ingroup c_statinfo
+ * \see db_flags */
+MDBX_NOTHROW_CONST_FUNCTION LIBMDBX_API intptr_t
+mdbx_limits_valsize4page_max(intptr_t pagesize, MDBX_db_flags_t flags);
+
 /** \brief Returns maximal write transaction size (i.e. limit for summary volume
  * of dirty pages) in bytes for given page size, or -1 if pagesize is invalid.
  * \ingroup c_statinfo */
@@ -3267,6 +3308,32 @@ mdbx_env_get_maxvalsize_ex(const MDBX_env *env, MDBX_db_flags_t flags);
  * \ingroup c_statinfo */
 MDBX_DEPRECATED MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API int
 mdbx_env_get_maxkeysize(const MDBX_env *env);
+
+/** \brief Returns maximal size of key-value pair to fit in a single page
+ * for specified database flags.
+ * \ingroup c_statinfo
+ *
+ * \param [in] env    An environment handle returned by \ref mdbx_env_create().
+ * \param [in] flags  Database options (\ref MDBX_DUPSORT, \ref MDBX_INTEGERKEY
+ *                    and so on). \see db_flags
+ *
+ * \returns The maximum size of a data can write,
+ *          or -1 if something is wrong. */
+MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API int
+mdbx_env_get_pairsize4page_max(const MDBX_env *env, MDBX_db_flags_t flags);
+
+/** \brief Returns maximal data size in bytes to fit in a leaf-page or
+ * single overflow/large-page for specified database flags.
+ * \ingroup c_statinfo
+ *
+ * \param [in] env    An environment handle returned by \ref mdbx_env_create().
+ * \param [in] flags  Database options (\ref MDBX_DUPSORT, \ref MDBX_INTEGERKEY
+ *                    and so on). \see db_flags
+ *
+ * \returns The maximum size of a data can write,
+ *          or -1 if something is wrong. */
+MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API int
+mdbx_env_get_valsize4page_max(const MDBX_env *env, MDBX_db_flags_t flags);
 
 /** \brief Sets application information (a context pointer) associated with
  * the environment.
